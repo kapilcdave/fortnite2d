@@ -1,334 +1,215 @@
 """
-FORTNITE 3D - Battle Royale
-A complete 3D battle royale game with building mechanics, combat, and 100 bot players.
-Built with Ursina Engine.
+FORTNITE 3D - SIMPLIFIED BATTLE ROYALE
+Clean, fun, easy-to-see 3D battle royale game!
 
 Controls:
-- WASD: Move
-- Mouse: Look around
-- Space: Jump
-- Shift: Sprint
-- Ctrl: Crouch
-- Left Click: Shoot
-- Right Click: Build
-- E: Pickup items / Open chests
-- Q/F/C/V: Select structure (Wall/Floor/Ramp/Roof)
-- Z/X/B: Select material (Wood/Brick/Metal)
-- 1-5: Switch weapons
-- Tab: Toggle menu
+    WASD - Move
+    Mouse - Look
+    Space - Jump
+    Shift - Sprint
+    LClick - Shoot
+    RClick - Build
+    E - Pickup
+    1-5 - Switch weapons
+    Q/F/C - Wall/Floor/Ramp
+    Z/X/B - Wood/Brick/Metalw
 """
-
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
 import random
 import math
 
-# === GAME SETTINGS ===
-MAP_SIZE = 150
-PLAYER_COUNT = 100
-BUILDING_SIZE = 2
+# === SETTINGS ===
+MAP_SIZE = 80
+BOT_COUNT = 15
+BUILD_SIZE = 2
 
-# === CUSTOM FIRST PERSON CONTROLLER ===
-class FortnitePlayer(FirstPersonController):
+# Simple weapon data [damage, fire_rate, mag, ammo_type]
+WEAPONS = {
+    'AR': [30, 0.15, 30, 'medium'],
+    'Shotgun': [80, 0.8, 8, 'shells'],
+    'SMG': [18, 0.08, 35, 'light'],
+    'Sniper': [120, 1.5, 5, 'heavy'],
+    'Pistol': [25, 0.2, 16, 'light'],
+}
+
+RARITY_COLORS = {
+    'common': color.gray,
+    'rare': color.blue,
+    'epic': color.violet,
+    'legendary': color.orange
+}
+
+# === PLAYER ===
+class Player(FirstPersonController):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        
-        # Stats
         self.health = 100
         self.shield = 0
         self.alive = True
         
-        # Combat
-        self.weapons = {}  # {slot: (weapon_name, rarity)}
+        self.weapons = {0: ('AR', 'common')}
         self.current_slot = 0
-        self.ammo = {'light': 120, 'shells': 40, 'heavy': 20, 'rockets': 8}
-        self.last_shot_time = 0
+        self.ammo = {'light': 200, 'medium': 150, 'heavy': 30, 'shells': 40}
+        self.last_shot = 0
         
-        # Building
         self.materials = {'wood': 100, 'brick': 50, 'metal': 50}
         self.current_material = 'wood'
         self.current_structure = 'wall'
-        self.build_preview = None
         
-        # Stats
         self.kills = 0
-        
-        # Movement
-        self.normal_speed = 5
-        self.sprint_speed = 8
-        self.crouch_speed = 3
-        self.speed = self.normal_speed
-        
-        # Visual
-        self.is_crouching = False
-        
-        # Add starting weapon
-        self.weapons[0] = ('AR', 'uncommon')
+        self.speed = 5
         
     def update(self):
         super().update()
-        
-        # Sprint
-        if held_keys['shift'] and not self.is_crouching:
-            self.speed = self.sprint_speed
-        elif self.is_crouching:
-            self.speed = self.crouch_speed
-        else:
-            self.speed = self.normal_speed
-        
-        # Crouch
-        if held_keys['control']:
-            if not self.is_crouching:
-                self.camera_pivot.y -= 0.5
-                self.is_crouching = True
-        else:
-            if self.is_crouching:
-                self.camera_pivot.y += 0.5
-                self.is_crouching = False
-        
-        # Update build preview
-        self.update_build_preview()
-        
-        # Keep within map bounds
+        self.speed = 7 if held_keys['shift'] else 5
         self.x = clamp(self.x, -MAP_SIZE//2, MAP_SIZE//2)
         self.z = clamp(self.z, -MAP_SIZE//2, MAP_SIZE//2)
-        
-    def update_build_preview(self):
-        # Show ghost preview of structure
-        if self.build_preview:
-            # Position preview based on where player is looking
-            hit_info = raycast(camera.world_position, camera.forward, distance=8, ignore=[self])
-            if hit_info.hit:
-                # Snap to grid
-                pos = hit_info.world_point
-                grid_x = round(pos.x / BUILDING_SIZE) * BUILDING_SIZE
-                grid_y = round(pos.y / BUILDING_SIZE) * BUILDING_SIZE
-                grid_z = round(pos.z / BUILDING_SIZE) * BUILDING_SIZE
-                self.build_preview.position = (grid_x, grid_y, grid_z)
-        
-    def take_damage(self, amount):
+    
+    def take_damage(self, dmg):
         if self.shield > 0:
-            if self.shield >= amount:
-                self.shield -= amount
+            if self.shield >= dmg:
+                self.shield -= dmg
             else:
-                remaining = amount - self.shield
+                dmg -= self.shield
                 self.shield = 0
-                self.health -= remaining
+                self.health -= dmg
         else:
-            self.health -= amount
-            
+            self.health -= dmg
+        
         if self.health <= 0:
             self.die()
     
     def die(self):
         self.alive = False
-        self.visible = False
-        self.position = (0, -100, 0)  # Move underground
+        self.position = (0, -50, 0)
     
     def shoot(self):
-        weapon = self.get_current_weapon()
+        weapon = self.weapons.get(self.current_slot)
         if not weapon:
             return
-            
-        current_time = time.time()
-        fire_rate = self.get_weapon_fire_rate(weapon[0])
         
-        if current_time - self.last_shot_time < fire_rate:
+        name, rarity = weapon
+        if name not in WEAPONS:
             return
         
-        ammo_type = self.get_weapon_ammo_type(weapon[0])
+        damage, fire_rate, mag, ammo_type = WEAPONS[name]
+        
+        if time.time() - self.last_shot < fire_rate:
+            return
         if self.ammo[ammo_type] <= 0:
             return
         
         self.ammo[ammo_type] -= 1
-        self.last_shot_time = current_time
+        self.last_shot = time.time()
         
-        # Raycast shoot
-        hit_info = raycast(camera.world_position, camera.forward, distance=100, ignore=[self])
+        # Shoot raycast
+        hit = raycast(camera.world_position, camera.forward, distance=150, ignore=[self])
         
-        if hit_info.hit:
-            # Check if hit a bot
-            if hasattr(hit_info.entity, 'bot_type'):
-                damage = self.get_weapon_damage(weapon[0])
-                hit_info.entity.take_damage(damage, self)
-            # Check if hit a structure
-            elif hasattr(hit_info.entity, 'structure_type'):
-                damage = self.get_weapon_damage(weapon[0])
-                hit_info.entity.take_damage(damage)
+        if hit.hit:
+            # Hit bot
+            if hasattr(hit.entity, 'is_bot'):
+                is_head = hit.world_point.y - hit.entity.y > 1.2
+                final_dmg = damage * (2.0 if is_head else 1.0)
+                hit.entity.take_damage(final_dmg, self)
+                
+                # Show damage number
+                DamageText(hit.world_point, int(final_dmg), is_head)
+            
+            # Hit structure
+            elif hasattr(hit.entity, 'is_structure'):
+                hit.entity.take_damage(damage)
         
-        # Muzzle flash effect
-        flash = Entity(model='cube', color=color.yellow, scale=0.2, position=camera.world_position + camera.forward * 2)
+        # Muzzle flash
+        flash = Entity(model='sphere', color=color.yellow, scale=0.2, 
+                      position=camera.world_position + camera.forward * 1, unlit=True)
         destroy(flash, delay=0.05)
     
-    def build_structure(self):
+    def build(self):
         if self.materials[self.current_material] < 10:
             return
-            
-        # Raycast to find build position
-        hit_info = raycast(camera.world_position, camera.forward, distance=8, ignore=[self])
         
-        if hit_info.hit:
+        # Find build position
+        hit = raycast(camera.world_position, camera.forward, distance=6, ignore=[self])
+        
+        if hit.hit:
             # Snap to grid
-            pos = hit_info.world_point
-            grid_x = round(pos.x / BUILDING_SIZE) * BUILDING_SIZE
-            grid_y = round(pos.y / BUILDING_SIZE) * BUILDING_SIZE
-            grid_z = round(pos.z / BUILDING_SIZE) * BUILDING_SIZE
+            pos = hit.world_point
+            x = round(pos.x / BUILD_SIZE) * BUILD_SIZE
+            y = round(pos.y / BUILD_SIZE) * BUILD_SIZE
+            z = round(pos.z / BUILD_SIZE) * BUILD_SIZE
             
-            # Create structure
-            structure = Structure((grid_x, grid_y, grid_z), self.current_structure, self.current_material)
+            BuildStructure((x, y, z), self.current_structure, self.current_material)
             self.materials[self.current_material] -= 10
-    
-    def get_current_weapon(self):
-        return self.weapons.get(self.current_slot)
-    
-    def get_weapon_damage(self, weapon_name):
-        damages = {'AR': 30, 'Shotgun': 80, 'SMG': 18, 'Sniper': 120, 'Pistol': 25, 'RPG': 100}
-        return damages.get(weapon_name, 10)
-    
-    def get_weapon_fire_rate(self, weapon_name):
-        rates = {'AR': 0.15, 'Shotgun': 0.8, 'SMG': 0.08, 'Sniper': 1.5, 'Pistol': 0.2, 'RPG': 2.0}
-        return rates.get(weapon_name, 0.5)
-    
-    def get_weapon_ammo_type(self, weapon_name):
-        types = {'AR': 'light', 'Shotgun': 'shells', 'SMG': 'light', 'Sniper': 'heavy', 'Pistol': 'light', 'RPG': 'rockets'}
-        return types.get(weapon_name, 'light')
 
-# === STRUCTURE CLASS ===
-class Structure(Entity):
-    def __init__(self, position, structure_type, material, **kwargs):
-        self.structure_type = structure_type
-        self.material = material
-        
-        # Material properties
-        colors = {'wood': color.rgb(139, 69, 19), 'brick': color.rgb(178, 34, 34), 'metal': color.gray}
-        healths = {'wood': 150, 'brick': 300, 'metal': 400}
-        
-        self.max_health = healths[material]
-        self.health = self.max_health
-        
-        # Create model based on type
-        if structure_type == 'wall':
-            model = 'cube'
-            scale = (BUILDING_SIZE, BUILDING_SIZE, BUILDING_SIZE * 0.3)
-        elif structure_type == 'floor':
-            model = 'cube'
-            scale = (BUILDING_SIZE, BUILDING_SIZE * 0.2, BUILDING_SIZE)
-        elif structure_type == 'ramp':
-            model = 'cube'  # Will rotate to make ramp
-            scale = (BUILDING_SIZE, BUILDING_SIZE * 0.2, BUILDING_SIZE)
-        elif structure_type == 'roof':
-            model = 'cube'
-            scale = (BUILDING_SIZE, BUILDING_SIZE * 0.3, BUILDING_SIZE)
-        else:
-            model = 'cube'
-            scale = BUILDING_SIZE
-        
-        super().__init__(
-            model=model,
-            color=colors[material],
-            position=position,
-            scale=scale,
-            collider='box',
-            **kwargs
-        )
-        
-        # Rotate ramp
-        if structure_type == 'ramp':
-            self.rotation_x = -25
-    
-    def take_damage(self, amount):
-        self.health -= amount
-        
-        # Update color to show damage
-        damage_percent = self.health / self.max_health
-        if damage_percent < 0.3:
-            self.color = color.rgb(100, 50, 50)
-        elif damage_percent < 0.6:
-            self.color = color.rgb(150, 75, 75)
-        
-        if self.health <= 0:
-            destroy(self)
-
-# === BOT CLASS ===
+# === BOT ===
 class Bot(Entity):
-    def __init__(self, position, **kwargs):
+    def __init__(self, pos):
         super().__init__(
             model='cube',
             color=color.red,
-            position=position,
-            scale=(0.8, 1.8, 0.8),
-            collider='box',
-            **kwargs
+            position=pos,
+            scale=(0.6, 1.6, 0.6),
+            collider='box'
         )
         
-        self.bot_type = True
+        self.is_bot = True
         self.health = 100
-        self.shield = 0
+        self.shield = random.choice([0, 50])
         self.alive = True
         
-        # AI
-        self.target = None
-        self.state = 'idle'  # idle, looting, fighting, rotating
-        self.move_timer = 0
-        self.move_direction = Vec3(0, 0, 0)
-        self.decision_timer = random.uniform(1, 3)
-        self.shoot_timer = 0
-        
-        # Movement
-        self.speed = 2
+        self.move_timer = random.uniform(1, 3)
+        self.shoot_timer = random.uniform(0.5, 2)
+        self.speed = random.uniform(1, 2)
         
     def update(self):
         if not self.alive:
             return
         
-        self.decision_timer -= time.dt
+        self.move_timer -= time.dt
+        self.shoot_timer -= time.dt
         
-        # Simple AI
-        if self.decision_timer <= 0:
-            self.decision_timer = random.uniform(2, 5)
+        # Random movement
+        if self.move_timer <= 0:
+            self.move_timer = random.uniform(2, 4)
             
-            # Random movement
-            angle = random.uniform(0, 2 * math.pi)
-            self.move_direction = Vec3(math.cos(angle) * self.speed, 0, math.sin(angle) * self.speed)
+            # Move towards center (safe zone)
+            if hasattr(game, 'storm'):
+                to_center = (game.storm.center - self.position).normalized()
+                self.position += to_center * self.speed * time.dt * 15
+            else:
+                angle = random.uniform(0, 6.28)
+                self.position += Vec3(math.cos(angle), 0, math.sin(angle)) * self.speed * time.dt * 10
         
-        # Move
-        self.position += self.move_direction * time.dt
-        
-        # Keep within bounds
+        # Keep in bounds
         self.x = clamp(self.x, -MAP_SIZE//2, MAP_SIZE//2)
         self.z = clamp(self.z, -MAP_SIZE//2, MAP_SIZE//2)
+        if self.y < 0.8:
+            self.y = 0.8
         
-        # Stay on ground (simple)
-        if self.y < 0.9:
-            self.y = 0.9
-        
-        # Shoot at player occasionally
+        # Shoot at player
         if hasattr(game, 'player') and game.player.alive:
             dist = distance(self.position, game.player.position)
-            if dist < 30 and random.random() < 0.01:  # 1% chance per frame to shoot
-                self.shoot_at_player()
+            if dist < 30 and self.shoot_timer <= 0:
+                self.shoot_timer = random.uniform(1, 3)
+                
+                direction = (game.player.position - self.position).normalized()
+                hit = raycast(self.position + Vec3(0, 0.8, 0), direction, distance=50, ignore=[self])
+                
+                if hit.hit and hit.entity == game.player:
+                    dmg = random.randint(8, 20)
+                    game.player.take_damage(dmg)
     
-    def shoot_at_player(self):
-        if not hasattr(game, 'player'):
-            return
-            
-        # Simple raycast toward player
-        direction = (game.player.position - self.position).normalized()
-        hit_info = raycast(self.position + Vec3(0, 1, 0), direction, distance=50, ignore=[self])
-        
-        if hit_info.hit and hit_info.entity == game.player:
-            game.player.take_damage(random.randint(5, 15))
-    
-    def take_damage(self, amount, attacker):
+    def take_damage(self, dmg, attacker):
         if self.shield > 0:
-            if self.shield >= amount:
-                self.shield -= amount
+            if self.shield >= dmg:
+                self.shield -= dmg
             else:
-                remaining = amount - self.shield
+                dmg -= self.shield
                 self.shield = 0
-                self.health -= remaining
+                self.health -= dmg
         else:
-            self.health -= amount
+            self.health -= dmg
         
         if self.health <= 0:
             self.die(attacker)
@@ -339,57 +220,90 @@ class Bot(Entity):
             killer.kills += 1
         destroy(self)
 
-# === ITEM CLASS ===
-class Item(Entity):
-    def __init__(self, position, item_type, item_data=None, **kwargs):
+# === STRUCTURES ===
+class BuildStructure(Entity):
+    def __init__(self, pos, stype, mat):
+        self.is_structure = True
+        self.build_mat = mat
         
-        colors_map = {
-            'weapon': color.blue,
-            'ammo': color.yellow,
-            'healing': color.red,
-            'shield': color.cyan,
-            'material': color.orange
+        # Material colors
+        mat_colors = {
+            'wood': color.rgb(160, 82, 45),
+            'brick': color.rgb(205, 92, 92),
+            'metal': color.rgb(192, 192, 192)
         }
         
-        # Convert tuple to Vec3 if needed
-        if isinstance(position, tuple):
-            position = Vec3(*position)
+        # HP values
+        hp_values = {'wood': 150, 'brick': 250, 'metal': 350}
+        self.max_hp = hp_values[mat]
+        self.hp = self.max_hp
         
+        # Simple cube for all structures
         super().__init__(
             model='cube',
-            color=colors_map.get(item_type, color.white),
-            position=position + Vec3(0, 0.5, 0),
-            scale=0.3,
+            color=mat_colors[mat],
+            position=pos,
+            scale=(BUILD_SIZE, BUILD_SIZE, BUILD_SIZE * 0.3) if stype == 'wall' 
+                  else (BUILD_SIZE, BUILD_SIZE * 0.2, BUILD_SIZE) if stype == 'floor'
+                  else (BUILD_SIZE, BUILD_SIZE, BUILD_SIZE),
             collider='box',
-            **kwargs
+            texture='white_cube'
         )
         
-        self.item_type = item_type
-        self.item_data = item_data
+        if stype == 'ramp':
+            self.rotation_x = -30
+    
+    def take_damage(self, dmg):
+        self.hp -= dmg
         
-        # Floating animation
-        self.original_y = self.y
-        self.time_offset = random.uniform(0, 6.28)
+        # Show damage
+        if self.hp / self.max_hp < 0.5:
+            self.color = color.rgb(80, 40, 40)
+        
+        if self.hp <= 0:
+            destroy(self)
+
+# === ITEMS ===
+class Item(Entity):
+    def __init__(self, pos, itype):
+        item_colors = {
+            'weapon': color.blue,
+            'ammo': color.yellow,
+            'shield': color.cyan,
+            'health': color.green
+        }
+        
+        super().__init__(
+            model='sphere',
+            color=item_colors.get(itype, color.white),
+            position=Vec3(*pos) + Vec3(0, 0.5, 0),
+            scale=0.4,
+            collider='box',
+            unlit=True
+        )
+        
+        self.item_type = itype
+        self.start_y = self.y
     
     def update(self):
-        # Rotate and bob
-        self.rotation_y += 50 * time.dt
-        self.y = self.original_y + math.sin(time.time() * 2 + self.time_offset) * 0.1
+        self.rotation_y += 80 * time.dt
+        self.y = self.start_y + math.sin(time.time() * 3) * 0.15
 
-# === CHEST CLASS ===
+# === CHEST ===
 class Chest(Entity):
-    def __init__(self, position, **kwargs):
+    def __init__(self, pos):
         super().__init__(
             model='cube',
             color=color.gold,
-            position=position,
-            scale=(0.8, 0.6, 0.8),
+            position=pos,
+            scale=(0.7, 0.5, 0.7),
             collider='box',
-            **kwargs
+            texture='white_cube',
+            unlit=True
         )
         
+        self.is_chest = True
         self.opened = False
-        self.chest_type = True
     
     def open(self):
         if self.opened:
@@ -397,290 +311,264 @@ class Chest(Entity):
         
         self.opened = True
         
-        # Spawn loot
-        for i in range(random.randint(3, 5)):
-            angle = random.uniform(0, 2 * math.pi)
-            offset = Vec3(math.cos(angle) * 2, 0, math.sin(angle) * 2)
-            
-            item_type = random.choice(['weapon', 'ammo', 'shield', 'healing', 'material'])
-            Item(self.position + offset, item_type)
+        # Spawn loot around chest
+        for i in range(random.randint(2, 4)):
+            angle = random.uniform(0, 6.28)
+            offset = Vec3(math.cos(angle) * 1.5, 0, math.sin(angle) * 1.5)
+            Item(self.position + offset, random.choice(['weapon', 'ammo', 'shield', 'health']))
         
         destroy(self)
 
-# === STORM CLASS ===
+# === STORM ===
 class Storm:
     def __init__(self):
-        self.current_radius = MAP_SIZE
-        self.target_radius = MAP_SIZE * 0.7
+        self.radius = MAP_SIZE * 0.9
+        self.target_radius = MAP_SIZE * 0.6
         self.center = Vec3(0, 0, 0)
-        self.damage = 1
-        self.shrink_speed = 0.5
+        self.damage = 2
         self.phase = 0
         
-        # Visual
-        self.entity = Entity(
+        # Visible storm wall
+        self.wall = Entity(
             model='sphere',
-            color=color.rgba(128, 0, 128, 50),
-            scale=self.current_radius * 2,
+            color=color.rgba(150, 0, 255, 100),
+            scale=self.radius * 2,
             position=self.center,
             double_sided=True,
             unlit=True
         )
-        self.entity.alpha = 0.2
+        self.wall.alpha = 0.3
     
     def update(self):
-        if self.current_radius > self.target_radius:
-            self.current_radius -= self.shrink_speed * time.dt
-            self.entity.scale = self.current_radius * 2
+        # Shrink
+        if self.radius > self.target_radius:
+            self.radius -= 0.3 * time.dt
+            self.wall.scale = self.radius * 2
+        else:
+            # Next phase
+            self.phase += 1
+            self.target_radius = max(5, self.target_radius * 0.7)
+            self.damage += 1
         
-        # Check if player is in storm
+        # Damage player if outside
         if hasattr(game, 'player') and game.player.alive:
-            player_dist = distance_2d(game.player.position, self.center)
-            if player_dist > self.current_radius:
-                # Take damage every second
-                if int(time.time() * 2) % 2 == 0:  # Rough timer
+            dist = distance_2d(game.player.position, self.center)
+            if dist > self.radius:
+                if int(time.time() * 2) % 2 == 0:
                     game.player.take_damage(self.damage)
 
-# === GAME CLASS ===
-class GameController:
+# === DAMAGE TEXT ===
+class DamageText(Entity):
+    def __init__(self, pos, dmg, is_head):
+        self.txt = Text(
+            text=str(dmg),
+            position=camera.world_to_screen_point(pos + Vec3(0, 1, 0)),
+            scale=2.5,
+            color=color.yellow if is_head else color.white,
+            origin=(0, 0)
+        )
+        self.timer = 1
+        invoke(self.remove, delay=1)
+    
+    def update(self):
+        self.timer -= time.dt
+        if hasattr(self, 'txt'):
+            self.txt.y += time.dt * 0.5
+            self.txt.alpha = self.timer
+    
+    def remove(self):
+        if hasattr(self, 'txt'):
+            destroy(self.txt)
+        destroy(self)
+
+# === GAME ===
+class Game:
     def __init__(self):
-        self.state = 'menu'  # menu, playing, victory, defeat
+        self.state = 'menu'
         self.player = None
         self.bots = []
         self.storm = None
-        self.hud = None
-        
-    def start_game(self):
+    
+    def start(self):
         self.state = 'playing'
         
         # Create player
-        self.player = FortnitePlayer(position=(0, 2, 0))
+        self.player = Player(position=(0, 2, 0))
         camera.fov = 90
         
         # Create bots
-        for i in range(min(PLAYER_COUNT - 1, 30)):  # Limit to 30 for performance
-            x = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-            z = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-            bot = Bot((x, 1, z))
-            self.bots.append(bot)
+        for i in range(BOT_COUNT):
+            x = random.uniform(-MAP_SIZE//2 + 5, MAP_SIZE//2 - 5)
+            z = random.uniform(-MAP_SIZE//2 + 5, MAP_SIZE//2 - 5)
+            self.bots.append(Bot((x, 0.8, z)))
         
-        # Create storm
+        # Storm
         self.storm = Storm()
         
-        # Spawn chests around map
-        for i in range(50):
+        # Spawn chests
+        for i in range(25):
             x = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
             z = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-            Chest((x, 0.3, z))
+            Chest((x, 0.25, z))
         
-        # Spawn floor loot
-        for i in range(80):
+        # Spawn items
+        for i in range(40):
             x = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
             z = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-            item_type = random.choice(['weapon', 'ammo', 'shield', 'healing'])
-            Item((x, 0, z), item_type)
+            Item((x, 0, z), random.choice(['weapon', 'ammo', 'shield', 'health']))
         
-        # Create HUD
         self.create_hud()
     
     def create_hud(self):
-        # Health bar
-        self.health_text = Text(text='HP: 100', position=(-0.85, 0.45), scale=1.5, color=color.green)
-        self.shield_text = Text(text='Shield: 0', position=(-0.85, 0.42), scale=1.5, color=color.cyan)
-        
-        # Materials
-        self.materials_text = Text(text='Wood: 100 | Brick: 50 | Metal: 50', position=(-0.85, 0.38), scale=1.2, color=color.orange)
-        
-        # Weapon
-        self.weapon_text = Text(text='Weapon: AR | Ammo: 120', position=(-0.85, 0.34), scale=1.2, color=color.white)
-        
-        # Kills
-        self.kills_text = Text(text='Eliminations: 0', position=(-0.85, 0.30), scale=1.2, color=color.yellow)
-        
-        # Players alive
-        self.players_text = Text(text='Players: 100', position=(0, 0.48), scale=1.5, color=color.white)
-        
-        # Crosshair
-        self.crosshair = Entity(model='quad', color=color.white, scale=0.008, position=(0, 0, 1), parent=camera.ui)
+        self.hp_txt = Text('HP: 100', position=(-0.85, 0.46), scale=2, color=color.green)
+        self.shield_txt = Text('Shield: 0', position=(-0.85, 0.42), scale=2, color=color.cyan)
+        self.mat_txt = Text('Wood: 100 | Brick: 50 | Metal: 50', position=(-0.85, 0.37), scale=1.5, color=color.orange)
+        self.weapon_txt = Text('AR (common) | Ammo: 150', position=(-0.85, 0.32), scale=1.5, color=color.white)
+        self.kills_txt = Text('Kills: 0', position=(-0.85, 0.27), scale=1.5, color=color.yellow)
+        self.players_txt = Text(f'Alive: {BOT_COUNT + 1}', position=(0, 0.48), scale=2.5, color=color.white)
+        self.crosshair = Entity(model='quad', color=color.white, scale=0.01, position=(0, 0, 1), parent=camera.ui)
     
     def update_hud(self):
         if not self.player:
             return
         
-        self.health_text.text = f'HP: {int(self.player.health)}'
-        self.shield_text.text = f'Shield: {int(self.player.shield)}'
+        self.hp_txt.text = f'HP: {int(self.player.health)}'
+        self.hp_txt.color = color.green if self.player.health > 50 else color.red
         
-        self.materials_text.text = f"Wood: {self.player.materials['wood']} | Brick: {self.player.materials['brick']} | Metal: {self.player.materials['metal']}"
+        self.shield_txt.text = f'Shield: {int(self.player.shield)}'
         
-        weapon = self.player.get_current_weapon()
+        self.mat_txt.text = f"Wood: {self.player.materials['wood']} | Brick: {self.player.materials['brick']} | Metal: {self.player.materials['metal']}"
+        
+        weapon = self.player.weapons.get(self.player.current_slot)
         if weapon:
-            ammo_type = self.player.get_weapon_ammo_type(weapon[0])
-            self.weapon_text.text = f'Weapon: {weapon[0]} | Ammo: {self.player.ammo[ammo_type]}'
+            name, rarity = weapon
+            if name in WEAPONS:
+                ammo_type = WEAPONS[name][3]
+                self.weapon_txt.text = f'{name} ({rarity}) | Ammo: {self.player.ammo[ammo_type]}'
+                self.weapon_txt.color = RARITY_COLORS.get(rarity, color.white)
         
-        self.kills_text.text = f'Eliminations: {self.player.kills}'
+        self.kills_txt.text = f'Kills: {self.player.kills}'
         
-        alive_bots = sum(1 for bot in self.bots if bot.alive)
-        total_alive = alive_bots + (1 if self.player.alive else 0)
-        self.players_text.text = f'Players: {total_alive}'
+        alive = sum(1 for b in self.bots if b.alive) + (1 if self.player.alive else 0)
+        self.players_txt.text = f'Alive: {alive}'
         
-        # Check win condition
-        if alive_bots == 0 and self.player.alive:
+        # Check win
+        if alive == 1 and self.player.alive and self.state == 'playing':
             self.victory()
-        elif not self.player.alive:
+        elif not self.player.alive and self.state == 'playing':
             self.defeat()
     
     def victory(self):
-        if self.state == 'victory':
-            return
         self.state = 'victory'
-        Text(text='VICTORY ROYALE!', position=(0, 0.1), scale=3, color=color.gold, origin=(0, 0))
-        Text(text=f'Eliminations: {self.player.kills}', position=(0, 0), scale=2, color=color.white, origin=(0, 0))
-        Text(text='Press ESC to exit', position=(0, -0.1), scale=1.5, color=color.white, origin=(0, 0))
+        Text('VICTORY ROYALE!', position=(0, 0.1), scale=5, color=color.gold, origin=(0, 0))
+        Text(f'Kills: {self.player.kills}', position=(0, -0.05), scale=3, color=color.white, origin=(0, 0))
     
     def defeat(self):
-        if self.state == 'defeat':
-            return
         self.state = 'defeat'
-        Text(text='ELIMINATED', position=(0, 0.1), scale=3, color=color.red, origin=(0, 0))
-        Text(text=f'Eliminations: {self.player.kills}', position=(0, 0), scale=2, color=color.white, origin=(0, 0))
-        Text(text='Press ESC to exit', position=(0, -0.1), scale=1.5, color=color.white, origin=(0, 0))
+        Text('ELIMINATED', position=(0, 0.1), scale=5, color=color.red, origin=(0, 0))
+        Text(f'Kills: {self.player.kills}', position=(0, -0.05), scale=3, color=color.white, origin=(0, 0))
 
-# === MAIN APP ===
+# === MAIN ===
 app = Ursina()
 
-# Create terrain
+# Ground
 ground = Entity(
     model='plane',
-    texture='grass',
+    texture='white_cube',
+    color=color.rgb(100, 180, 100),
     scale=(MAP_SIZE, 1, MAP_SIZE),
-    collider='box',
-    color=color.rgb(100, 200, 100)
+    collider='box'
 )
 
-# Add some trees for decoration
-for i in range(100):
+# Trees (fewer, colorful)
+for i in range(30):
     x = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
     z = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-    tree = Entity(
-        model='cube',
-        color=color.rgb(101, 67, 33),
-        position=(x, 2, z),
-        scale=(0.5, 4, 0.5)
-    )
-    # Tree top
-    leaves = Entity(
-        model='sphere',
-        color=color.rgb(34, 139, 34),
-        position=(x, 5, z),
-        scale=2
-    )
+    
+    # Trunk
+    Entity(model='cube', color=color.rgb(101, 67, 33), position=(x, 1.5, z), scale=(0.4, 3, 0.4))
+    
+    # Leaves
+    Entity(model='sphere', color=color.rgb(50, 200, 50), position=(x, 4, z), scale=1.5, unlit=True)
 
-# Add some rocks
-for i in range(50):
+# Rocks (colorful)
+for i in range(20):
     x = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
     z = random.uniform(-MAP_SIZE//2, MAP_SIZE//2)
-    rock = Entity(
-        model='sphere',
-        color=color.gray,
-        position=(x, 0.5, z),
-        scale=random.uniform(0.8, 1.5)
-    )
+    Entity(model='sphere', color=color.gray, position=(x, 0.4, z), scale=random.uniform(0.6, 1.2), collider='box')
 
 # Sky
-Sky(color=color.rgb(135, 206, 235))
+Sky(color=color.rgb(135, 206, 250))
 
 # Lighting
-DirectionalLight(y=2, z=3, shadows=True)
+DirectionalLight(y=2, z=3)
+AmbientLight(color=color.rgba(255, 255, 255, 0.3))
 
-# Create game controller
-game = GameController()
+# Game
+game = Game()
 
 # Menu
-menu_title = Text(text='FORTNITE 3D', position=(0, 0.2), scale=3, color=color.rgb(0, 150, 255), origin=(0, 0))
-menu_start = Text(text='Press ENTER to Start', position=(0, 0), scale=2, color=color.white, origin=(0, 0))
-menu_controls = Text(text='WASD: Move | Mouse: Look | Space: Jump | LClick: Shoot | RClick: Build', position=(0, -0.2), scale=1, color=color.light_gray, origin=(0, 0))
+menu_title = Text('FORTNITE 3D - SIMPLIFIED', position=(0, 0.2), scale=3, color=color.cyan, origin=(0, 0))
+menu_start = Text('Press ENTER to Start', position=(0, 0), scale=2.5, color=color.white, origin=(0, 0))
+menu_info = Text(f'{BOT_COUNT} Bots | Clean Graphics | Fun Gameplay', position=(0, -0.15), scale=1.5, color=color.light_gray, origin=(0, 0))
 
 def input(key):
-    if game.state == 'menu':
-        if key == 'enter':
-            destroy(menu_title)
-            destroy(menu_start)
-            destroy(menu_controls)
-            game.start_game()
+    if game.state == 'menu' and key == 'enter':
+        destroy(menu_title)
+        destroy(menu_start)
+        destroy(menu_info)
+        game.start()
     
-    elif game.state == 'playing':
-        if game.player:
-            # Shooting
-            if key == 'left mouse down':
-                game.player.shoot()
-            
-            # Building
-            if key == 'right mouse down':
-                game.player.build_structure()
-            
-            # Structure selection
-            if key == 'q':
-                game.player.current_structure = 'wall'
-            elif key == 'f':
-                game.player.current_structure = 'floor'
-            elif key == 'c':
-                game.player.current_structure = 'ramp'
-            elif key == 'v':
-                game.player.current_structure = 'roof'
-            
-            # Material selection
-            if key == 'z':
-                game.player.current_material = 'wood'
-            elif key == 'x':
-                game.player.current_material = 'brick'
-            elif key == 'b':
-                game.player.current_material = 'metal'
-            
-            # Weapon switching
-            for i in range(1, 6):
-                if key == str(i):
-                    game.player.current_slot = i - 1
-            
-            # Pickup/Interact
-            if key == 'e':
-                # Check for nearby items
-                for entity in scene.entities:
-                    if hasattr(entity, 'item_type'):
-                        dist = distance(game.player.position, entity.position)
-                        if dist < 3:
-                            # Simple pickup logic
-                            if entity.item_type == 'ammo':
-                                game.player.ammo['light'] += 30
-                            elif entity.item_type == 'shield':
-                                game.player.shield = min(100, game.player.shield + 25)
-                            elif entity.item_type == 'healing':
-                                game.player.health = min(100, game.player.health + 25)
-                            elif entity.item_type == 'material':
-                                mat = random.choice(['wood', 'brick', 'metal'])
-                                game.player.materials[mat] += 20
-                            elif entity.item_type == 'weapon':
-                                weapon_name = random.choice(['AR', 'Shotgun', 'SMG', 'Sniper', 'Pistol'])
-                                game.player.weapons[game.player.current_slot] = (weapon_name, 'rare')
-                            destroy(entity)
-                    
-                    # Check for chests
-                    if hasattr(entity, 'chest_type'):
-                        dist = distance(game.player.position, entity.position)
-                        if dist < 3:
-                            entity.open()
+    elif game.state == 'playing' and game.player:
+        if key == 'left mouse down':
+            game.player.shoot()
+        elif key == 'right mouse down':
+            game.player.build()
+        elif key == 'q':
+            game.player.current_structure = 'wall'
+        elif key == 'f':
+            game.player.current_structure = 'floor'
+        elif key == 'c':
+            game.player.current_structure = 'ramp'
+        elif key == 'z':
+            game.player.current_material = 'wood'
+        elif key == 'x':
+            game.player.current_material = 'brick'
+        elif key == 'b':
+            game.player.current_material = 'metal'
+        elif key in '12345':
+            game.player.current_slot = int(key) - 1
+        elif key == 'e':
+            # Pickup items
+            for ent in scene.entities:
+                if hasattr(ent, 'item_type') and distance(game.player.position, ent.position) < 3:
+                    itype = ent.item_type
+                    if itype == 'weapon':
+                        weapon = random.choice(list(WEAPONS.keys()))
+                        rarity = random.choice(['common', 'rare', 'epic', 'legendary'])
+                        game.player.weapons[game.player.current_slot] = (weapon, rarity)
+                    elif itype == 'ammo':
+                        for atype in game.player.ammo:
+                            game.player.ammo[atype] = min(game.player.ammo[atype] + 30, 999)
+                    elif itype == 'shield':
+                        game.player.shield = min(100, game.player.shield + 50)
+                    elif itype == 'health':
+                        game.player.health = min(100, game.player.health + 50)
+                    destroy(ent)
+                
+                # Open chests
+                elif hasattr(ent, 'is_chest') and distance(game.player.position, ent.position) < 3:
+                    ent.open()
 
 def update():
     if game.state == 'playing':
-        # Update bots
         for bot in game.bots:
             if bot.alive:
                 bot.update()
         
-        # Update storm
         if game.storm:
             game.storm.update()
         
-        # Update HUD
         game.update_hud()
 
 app.run()
