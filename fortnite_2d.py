@@ -208,18 +208,19 @@ class Bot(pygame.sprite.Sprite):
         self.pos = pygame.math.Vector2(random.uniform(-spawn_range, spawn_range), random.uniform(-spawn_range, spawn_range))
         self.rect.center = self.pos
         
-        self.speed = 3.5
-        self.health = 100
+        self.speed = 2
+        self.health = 80
         
         # AI State
-        self.weapon = AR() # Bots use ARs
+        self.weapon = Weapon("Bot AR", 5, 45, 0.15, 1, (50, 50, 50)) # Slower, less damage
         self.state = "WANDER" # WANDER, CHASE, FLEE
         self.target = None
         self.change_dir_timer = 0
         self.wander_dir = pygame.math.Vector2(1, 0)
 
-    def update(self, player_pos, storm_radius):
+    def update(self, player_pos, storm_radius, walls_group):
         self.weapon.update()
+        old_pos = pygame.math.Vector2(self.pos)
         
         dist_to_player = self.pos.distance_to(player_pos)
         dist_to_center = self.pos.length()
@@ -233,7 +234,6 @@ class Bot(pygame.sprite.Sprite):
             self.state = "WANDER"
             
         if self.state == "FLEE_STORM":
-            # Move towards center (0,0)
             direction = -self.pos
             if direction.length() > 0:
                 self.pos += direction.normalize() * self.speed
@@ -241,13 +241,12 @@ class Bot(pygame.sprite.Sprite):
         elif self.state == "CHASE":
             direction = player_pos - self.pos
             if direction.length() > 0:
-                self.pos += direction.normalize() * self.speed
+                self.pos += direction.normalize() * (self.speed * 0.7)
                 
             # Shoot
-            if self.weapon.can_shoot() and dist_to_player < 500:
-                # Random chance to shoot to simulate reaction time
-                if random.random() < 0.05:
-                     return True # Signal to game to spawn bullet
+            if self.weapon.can_shoot() and dist_to_player < 400:
+                if random.random() < 0.015:
+                     return True
                 
         elif self.state == "WANDER":
             self.change_dir_timer -= 1
@@ -260,8 +259,16 @@ class Bot(pygame.sprite.Sprite):
             self.pos += self.wander_dir * (self.speed * 0.5)
 
         self.rect.center = self.pos
-        # Simple rotation towards movement
-        # (omitted for bots to keep performance high, they track player in logic anyway)
+        
+        # Wall collision: bounce off
+        for wall in walls_group:
+            if self.rect.colliderect(wall.rect):
+                # Push back to old position and reverse wander
+                self.pos = old_pos
+                self.rect.center = self.pos
+                self.wander_dir = -self.wander_dir
+                break
+        
         return False
 
     def take_damage(self, amount):
@@ -283,7 +290,7 @@ class Bullet(pygame.sprite.Sprite):
         self.speed = 20
         self.damage = damage
         self.from_player = from_player
-        self.lifetime = 120 
+        self.lifetime = 300 
 
     def update(self):
         self.pos += self.direction * self.speed
@@ -393,6 +400,8 @@ class Storm:
 def main():
     # Groups
     all_sprites = pygame.sprite.Group()
+    solids_group = pygame.sprite.Group() # For movement/building collision (Walls, Trees, Rocks, Bots, Player)
+    
     players_group = pygame.sprite.Group() # Contains single player
     bots_group = pygame.sprite.Group()
     bullets_group = pygame.sprite.Group()
@@ -404,6 +413,7 @@ def main():
     player = Player()
     all_sprites.add(player)
     players_group.add(player)
+    solids_group.add(player)
     
     camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
     storm = Storm()
@@ -413,16 +423,19 @@ def main():
         bot = Bot()
         all_sprites.add(bot)
         bots_group.add(bot)
+        solids_group.add(bot)
         
     for _ in range(50):
         tree = Tree()
         all_sprites.add(tree)
         nature_group.add(tree)
+        solids_group.add(tree)
         
     for _ in range(30):
         rock = Rock()
         all_sprites.add(rock)
         nature_group.add(rock)
+        solids_group.add(rock)
         
     # Fonts
     font_ui = pygame.font.SysFont("Segoe UI", 20, bold=True)
@@ -432,6 +445,39 @@ def main():
     game_over = False
     victory = False
     
+    # Damage Log
+    damage_log = [] # List of (text, timer)
+    
+    def add_log(text):
+        damage_log.append([text, 120])
+        if len(damage_log) > 5:
+            damage_log.pop(0)
+
+    # Line of Sight Check
+    def check_line_of_sight(start_pos, end_pos, ignore_group):
+        start_pos = pygame.math.Vector2(start_pos)
+        end_pos = pygame.math.Vector2(end_pos)
+        
+        # Simple approach: Check intersection with nature and walls
+        line_vec = end_pos - start_pos
+        dist = line_vec.length()
+        steps = int(dist // 20) # Check every 20 units
+        if steps == 0: return True
+        
+        step_vec = line_vec.normalize() * 20
+        
+        # Optimization: Only check obstacles in range or broadphase
+        obstacles = []
+        obstacles.extend(walls_group.sprites())
+        obstacles.extend(nature_group.sprites())
+        
+        # Check explicit intersection with rects
+        # Using clipline on rects is standard
+        for obs in obstacles:
+            if obs.rect.clipline(start_pos, end_pos):
+                return False # Blocked
+        return True
+
     while running:
         # 1. Event Handling
         for event in pygame.event.get():
@@ -440,31 +486,39 @@ def main():
                 
             if not game_over:
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1: # Left Click: Shoot / Harvest
-                        # Check harvest first (short range)
+                    if event.button == 1: # Left Click: Always Shoot
                         mx, my = pygame.mouse.get_pos()
                         world_pos = pygame.math.Vector2(mx - camera.camera.x, my - camera.camera.y)
-                        
-                        # Check click on nature
-                        clicked_sprites = [s for s in nature_group if s.rect.collidepoint(world_pos)]
-                        harvested = False
-                        
-                        for nature in clicked_sprites:
-                            if player.pos.distance_to(nature.pos) < 150: # Range check
-                                if nature.take_damage(25):
-                                    player.materials += 10
-                                    # Particle
-                                    for _ in range(5):
-                                        p = Particle(nature.rect.center, BROWN_WOOD if isinstance(nature, Tree) else GRAY_STONE, 8, 30)
-                                        all_sprites.add(p)
-                                        particles_group.add(p)
-                                harvested = True
-                                
-                        if not harvested:
-                            player.shoot(world_pos, bullets_group, all_sprites)
-                            
-                    if event.button == 3: # Right Click: Build
+                        player.shoot(world_pos, bullets_group, all_sprites)
+                
+                if event.type == pygame.KEYDOWN:
+                    # E = Harvest nearest tree/rock
+                    if event.key == pygame.K_e:
+                        nearest = None
+                        nearest_dist = 150
+                        for nature in nature_group:
+                            d = player.pos.distance_to(pygame.math.Vector2(nature.pos))
+                            if d < nearest_dist:
+                                nearest_dist = d
+                                nearest = nature
+                        if nearest:
+                            if nearest.take_damage(25):
+                                player.materials += 15
+                                for _ in range(5):
+                                    p = Particle(nearest.rect.center, BROWN_WOOD if isinstance(nearest, Tree) else GRAY_STONE, 8, 30)
+                                    all_sprites.add(p)
+                                    particles_group.add(p)
+                                nearest.remove(solids_group)
+                            else:
+                                player.materials += 5
+                                add_log(f"Harvesting... (+5 mats)")
+                        else:
+                            add_log("Nothing nearby to harvest")
+                    
+                    # Q = Build wall in front of player
+                    if event.key == pygame.K_q:
                         if player.materials >= 10:
+                            # Place wall at mouse cursor position
                             mx, my = pygame.mouse.get_pos()
                             world_x = mx - camera.camera.x
                             world_y = my - camera.camera.y
@@ -475,9 +529,9 @@ def main():
                             new_rect = pygame.Rect(0, 0, 50, 50)
                             new_rect.center = (grid_x, grid_y)
                             
-                            # Valid placement check
+                            # Valid placement check -> ONLY against solids
                             collides = False
-                            for sprite in all_sprites:
+                            for sprite in solids_group:
                                 if sprite != player and sprite.rect.colliderect(new_rect):
                                     collides = True
                                     break
@@ -486,7 +540,13 @@ def main():
                                 wall = Wall((grid_x, grid_y))
                                 walls_group.add(wall)
                                 all_sprites.add(wall)
+                                solids_group.add(wall)
                                 player.materials -= 10
+                                add_log("Wall placed!")
+                            else:
+                                add_log("Cannot build here!")
+                        else:
+                            add_log("Not enough materials!")
 
         if game_over:
             screen.fill(BLACK)
@@ -502,8 +562,8 @@ def main():
             
             keys = pygame.key.get_pressed()
             if keys[pygame.K_r]:
-                main() # Lazy restart: recursion (careful) or just break to loop. 
-                return # Better to structure properly, but this works for simple scripts
+                main() 
+                return
                 
             clock.tick(FPS)
             continue
@@ -514,15 +574,17 @@ def main():
         
         # Bot Logic
         for bot in bots_group:
-            should_shoot = bot.update(player.pos, storm.radius)
+            should_shoot = bot.update(player.pos, storm.radius, walls_group)
             if should_shoot:
-                # Bot shoots at player
-                direction = (player.pos - bot.pos).normalize()
-                # Bot inaccuracy
-                direction = direction.rotate_rad(random.uniform(-0.1, 0.1))
-                bullet = Bullet(bot.rect.center, direction, 8, False, (255, 100, 100))
-                bullets_group.add(bullet)
-                all_sprites.add(bullet)
+                # Check Line of Sight before shooting
+                if check_line_of_sight(bot.rect.center, player.rect.center, bots_group):
+                    # Bot shoots at player
+                    direction = (player.pos - bot.pos).normalize()
+                    # Bot inaccuracy
+                    direction = direction.rotate_rad(random.uniform(-0.1, 0.1))
+                    bullet = Bullet(bot.rect.center, direction, 8, False, (255, 100, 100))
+                    bullets_group.add(bullet)
+                    all_sprites.add(bullet)
 
         camera.update(player)
         storm.update()
@@ -533,6 +595,7 @@ def main():
         for bullet, walls in hits.items():
             for wall in walls:
                 wall.take_damage(bullet.damage)
+                if wall.health <= 0: wall.remove(solids_group)
                 # Particles
                 p = Particle(bullet.rect.center, BROWN_WOOD, 5, 20)
                 all_sprites.add(p)
@@ -542,7 +605,8 @@ def main():
         hits = pygame.sprite.groupcollide(bullets_group, nature_group, True, False)
         for bullet, natures in hits.items():
             for n in natures:
-                n.take_damage(bullet.damage)
+                if n.take_damage(bullet.damage): # if destroyed
+                     if n.health <= 0: n.remove(solids_group)
                 
         # Bullets hit Bots
         hits = pygame.sprite.groupcollide(bots_group, bullets_group, False, False)
@@ -550,7 +614,9 @@ def main():
             for bullet in bullets_hit:
                 if bullet.from_player:
                     if bot.take_damage(bullet.damage):
+                        bot.remove(solids_group)
                         player.kills += 1
+                        add_log(f"Eliminated Bot! ({len(bots_group)} remain)")
                     bullet.kill()
                     # Blood particle
                     p = Particle(bot.rect.center, RED_ENEMY, 6, 30)
@@ -567,11 +633,11 @@ def main():
                 p = Particle(player.rect.center, BLUE_PLAYER, 6, 30)
                 all_sprites.add(p)
                 particles_group.add(p)
+                add_log("Took Damage!")
 
         # Storm Damage
         if storm.check_damage(player):
-            # Visual feedback?
-            pass
+            add_log("Storm Damage!")
 
         # Game Over Conditions
         if player.health <= 0:
@@ -604,6 +670,9 @@ def main():
         for sprite in bullets_group: screen.blit(sprite.image, camera.apply(sprite))
         for sprite in particles_group: screen.blit(sprite.image, camera.apply(sprite))
         
+        # Draw Ghost Wall if placing
+        # (Simplified: Just draw cursor rect if right click held? Nah, too complex for now, just stick to placement)
+        
         storm.draw(screen, camera)
         
         # Draw UI
@@ -632,8 +701,20 @@ def main():
         kill_txt = font_ui.render(f"Kills: {player.kills} | Alive: {len(bots_group)+1}", True, WHITE)
         screen.blit(kill_txt, (20, 110))
         
+        # Damage Log
+        log_y = 160
+        for i, (text, timer) in enumerate(damage_log):
+             # Fade out OLD logs
+             alpha = min(255, timer * 5)
+             log_surf = font_ui.render(text, True, (255, 100, 100))
+             log_surf.set_alpha(alpha)
+             screen.blit(log_surf, (20, log_y + i * 25))
+             damage_log[i][1] -= 1
+        
+        damage_log = [l for l in damage_log if l[1] > 0]
+
         # Controls Hint
-        hint = font_ui.render("WASD=Move | Click=Shoot | RightClk=Build | 1-3=Weapon", True, (200, 200, 200))
+        hint = font_ui.render("WASD=Move | Click=Shoot | Q=Build | E=Harvest | 1-3=Weapon", True, (200, 200, 200))
         screen.blit(hint, (10, SCREEN_HEIGHT - 30))
 
         pygame.display.flip()
