@@ -1,2 +1,1 @@
-ursina
-panda3d
+pygame

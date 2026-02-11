@@ -1,93 +1,54 @@
-# Fortnite 3D - Simplified Battle Royale
+# Fortnite 2D - Pygame Edition
 
-A clean, fun, easy-to-see 3D battle royale game!
+A simplified, top-down 2D battle royale game inspired by Fortnite!
 
 ## 🎮 How to Play
 
 ```bash
-python fortnite_3d.py
+python fortnite_2d.py
 ```
 
-Press **ENTER** to drop into battle!
+Drops you straight into a battle against 10 bots!
 
 ## 🎯 Controls
 
 ### Movement
-- **WASD** - Move around
-- **Mouse** - Look & aim
-- **Space** - Jump
-- **Shift** - Sprint
+- **WASD** - Move your character
+- **Mouse** - Aim (Look Direction)
 
 ### Combat
-- **Left Click** - Shoot
-- **1-5** - Switch weapons
-- **E** - Pickup items
+- **Left Click** - Shoot (Fires Bullets)
+- **Bots** - Will chase and shoot when you get close!
 
 ### Building
-- **Right Click** - Build
-- **Q** - Wall
-- **F** - Floor  
-- **C** - Ramp
-- **Z/X/B** - Wood/Brick/Metal
+- **Right Click** - Build Wall
+    - Costs **10 Materials**
+    - Places a 40x40 brownish block
+    - Blocks bullets and movement
 
 ## ✨ Features
 
-### Simple & Clean
-- **15 Bots** - Perfect for fast-paced action
-- **Smaller Map** (80x80) - Quick battles
-- **Bright, Colorful Items** - Easy to spot
-  - 🔵 Blue = Weapons
-  - 🟡 Yellow = Ammo
-  - 🔵 Cyan = Shields
-  - 🟢 Green = Health
-- **Visible Storm** - Purple glowing wall
-- **Golden Chests** - Find 2-4 items each
-- **Simple Cube Building** - Easy to place
+### Simple & Fast
+- **10 Bots** - Roaming the map
+- **Top-Down View** - Classic arcade shooter style
+- **Grid Map** - Infinite-looking grass field with a grid
+- **Simple Graphics**
+  - 🔵 **Blue Circle** = You
+  - 🔴 **Red Circle** = Enemy Bot
+  - 🟡 **Yellow Square** = Bullet
+  - 🟫 **Brown Square** = Wall
 
-### Weapons
-- **AR** - All-around assault rifle
-- **Shotgun** - Close range power
-- **SMG** - Fast fire rate
-- **Sniper** - Long range headshots
-- **Pistol** - Reliable sidearm
+### Gameplay Mechanics
+- **Battle Royale Style**: Be the last one standing!
+- **Health System**: Start with 100 HP. Don't get hit!
+- **Building System**: Place cover instantly to block shots.
+- **Storm**: A purple circle shrinks over time. Stay inside or take damage!
+- **Kills**: Track how many bots you eliminate.
 
-### Rarities
-- Common (Gray)
-- Rare (Blue)
-- Epic (Purple)
-- Legendary (Orange)
+## 🌟 Simplified Design
 
-### Combat Features
-- **Headshots** = 2x damage!
-- **Damage Numbers** - Yellow for headshots
-- **Health & Shields** - Visible bars
-- **Kill Counter**
+- No complex inventory or looting yet.
+- Focus on movement, aim, and quick building.
+- Clean, minimal UI showing Health, Mats, and Alive count.
 
-### Building
-- **3 Materials**: Wood (150 HP), Brick (250 HP), Metal (350 HP)
-- **3 Structures**: Wall, Floor, Ramp
-- **Simple Cubes** - Easy to place and see
-
-### Storm
-- **Visible Purple Wall** - See exactly where it is
-- **Shrinks Over Time** - Forces combat
-- **Increasing Damage** - Don't get caught outside!
-
-## 🎯 Tips
-
-1. **Look for golden chests** - Best loot!
-2. **Grab colorful items** - Blue/Yellow/Cyan/Green
-3. **Build when shot** - Quick cover
-4. **Watch the purple storm** - Stay inside
-5. **Aim for the head** - 2x damage!
-
-## 🌟 Simplified Features
-
-- Fewer bots for smooth gameplay
-- Smaller map = more action
-- Bright colors = easy to see items
-- Simple building = just cubes
-- Visible storm = no surprises
-- Clean graphics = better FPS
-
-**Last One Standing Wins! 🏆**
+**Victory Royale! 🏆**
